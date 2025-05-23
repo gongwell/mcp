@@ -1,6 +1,9 @@
 import httpx
 from typing import Any, Dict
 import asyncio
+import json
+import os
+from mcp import StdioServer, ToolCallResult, tool
 
 # Attempt to import FastMCP from the expected location
 try:
@@ -100,19 +103,60 @@ async def get_analysis_result(result_id: str) -> Dict[str, Any] | str:
     url = f"{AZURE_ENDPOINT}contentunderstanding/analyzers/{AZURE_ANALYZER_ID}/results/{result_id}?api-version={API_VERSION}"
     return await azure_content_request("GET", url)
 
-# Example main for testing
+# --- Tool Definitions ---
+
+@tool(
+    name="analyze_local_video",
+    description="Analyzes a video file stored locally and returns a description and tags.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "The absolute local path to the video file to be analyzed."
+            }
+        },
+        "required": ["file_path"]
+    }
+)
+async def analyze_local_video(file_path: str) -> ToolCallResult:
+    print(f"[ContentUnderstandingServer] Received request to analyze video at: {file_path}")
+    if not os.path.exists(file_path):
+        print(f"[ContentUnderstandingServer] Error: File not found at {file_path}")
+        return ToolCallResult(
+            is_error=True,
+            content={"error": "File not found", "file_path": file_path}
+        )
+    
+    if not os.path.isfile(file_path):
+        print(f"[ContentUnderstandingServer] Error: Path is not a file: {file_path}")
+        return ToolCallResult(
+            is_error=True,
+            content={"error": "Path is not a file", "file_path": file_path}
+        )
+
+    # Simulate video analysis
+    await asyncio.sleep(1) # Simulate processing time
+    
+    file_name = os.path.basename(file_path)
+    simulated_analysis = {
+        "file_name": file_name,
+        "description": f"This is a simulated analysis of the video '{file_name}'. It appears to be a video about interesting content.",
+        "tags": ["simulated", "video", "analysis", "interesting"],
+        "duration_seconds": 15, # Simulated
+        "resolution": "1920x1080" # Simulated
+    }
+    print(f"[ContentUnderstandingServer] Successfully analyzed video: {file_path}. Analysis: {simulated_analysis}")
+    return ToolCallResult(content=simulated_analysis)
+
+# --- Main Server Logic ---
+
 async def main():
-    # 1. 创建/更新分析器
-    analyzer_resp = await create_or_update_analyzer()
-    print("Analyzer create/update response:", analyzer_resp)
-    # 2. 假设获得 operationId，查询状态
-    # operation_id = ...
-    # status_resp = await get_operation_status(operation_id)
-    # print("Operation status:", status_resp)
-    # 3. 假设获得 resultId，获取分析结果
-    # result_id = ...
-    # result_resp = await get_analysis_result(result_id)
-    # print("Analysis result:", result_resp)
+    server = StdioServer()
+    server.register_tool(analyze_local_video)
+    print("[ContentUnderstandingServer] Content Understanding MCP Server started. Registered tools: analyze_local_video")
+    print("[ContentUnderstandingServer] Waiting for tool calls via MCP protocol...")
+    await server.run()
 
 if __name__ == "__main__":
-    mcp.run() 
+    asyncio.run(main()) 

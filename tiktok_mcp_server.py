@@ -1,6 +1,7 @@
 import httpx
 from typing import Any, Dict
 import asyncio
+import os
 
 # Attempt to import FastMCP from the expected location
 try:
@@ -214,10 +215,74 @@ async def get_post_trending(count: int = 16) -> Dict[str, Any] | str:
 @mcp.tool()
 async def download_video(url: str) -> Dict[str, Any] | str:
     """
-    下载视频
+    下载视频到本地并返回本地路径
+    """
+    TEMP_VIDEO_DOWNLOAD_DIR = "/tmp/mcp_video_downloads"
+    # 1. 调用 TikTok API 拿到视频直链
+    params = {"url": url}
+    api_result = await make_tiktok_request("api/download/video", params)
+    if not isinstance(api_result, dict):
+        return {"error": f"Failed to get video download info: {api_result}"}
+    # 2. 获取 play 字段
+    play_url = api_result.get("data", {}).get("play")
+    if not play_url:
+        return {"error": "No play url found in TikTok API response."}
+    # 3. 下载到本地
+    if not os.path.exists(TEMP_VIDEO_DOWNLOAD_DIR):
+        os.makedirs(TEMP_VIDEO_DOWNLOAD_DIR)
+    filename = play_url.split("/")[-1].split("?")[0]
+    if not filename.endswith(".mp4"):
+        filename += ".mp4"
+    local_path = os.path.join(TEMP_VIDEO_DOWNLOAD_DIR, filename)
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            resp = await client.get(play_url)
+            resp.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(resp.content)
+    except Exception as e:
+        return {"error": f"Failed to download video: {str(e)}"}
+    # 4. 只返回本地路径
+    return {"file_path": local_path}
+
+@mcp.tool()
+async def get_video_download_url(url: str) -> dict:
+    """
+    获取 TikTok 视频的下载直链（play/play_watermark），不下载
     """
     params = {"url": url}
-    return await make_tiktok_request("api/download/video", params)
+    api_result = await make_tiktok_request("api/download/video", params)
+    # 兼容不同返回结构
+    data = api_result.get("data", api_result)
+    return {
+        "play": data.get("play"),
+        "play_watermark": data.get("play_watermark")
+    }
+
+@mcp.tool()
+async def download_video_by_url(play_url: str) -> dict:
+    """
+    通过视频直链下载视频到本地并返回本地路径
+    """
+    TEMP_VIDEO_DOWNLOAD_DIR = "/tmp/mcp_video_downloads"
+    import os
+    if not play_url or not isinstance(play_url, str):
+        return {"error": "Invalid play_url"}
+    if not os.path.exists(TEMP_VIDEO_DOWNLOAD_DIR):
+        os.makedirs(TEMP_VIDEO_DOWNLOAD_DIR)
+    filename = play_url.split("/")[-1].split("?")[0]
+    if not filename.endswith(".mp4"):
+        filename += ".mp4"
+    local_path = os.path.join(TEMP_VIDEO_DOWNLOAD_DIR, filename)
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            resp = await client.get(play_url)
+            resp.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(resp.content)
+    except Exception as e:
+        return {"error": f"Failed to download video: {str(e)}"}
+    return {"file_path": local_path}
 
 async def main():
     # Example usage
